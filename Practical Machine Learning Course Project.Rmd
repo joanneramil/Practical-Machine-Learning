@@ -1,0 +1,144 @@
+---
+title: "Practical Machine Learning Course Project"
+output: html_document
+---
+# Overview
+The goal of this project is to predict the manner of exercise, represented by the "classe" variable. The following document is a report that outlines the model building process, cross validation, and sample error. The prediction model will also be used to predict 20 different test cases.
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har 
+
+# Prepping the Environment
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Loading the Appropriate Packages
+library(knitr)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(corrplot)
+library(rattle)
+library(randomForest)
+library(gbm)
+library(ggplot2)
+
+# Setting the seed
+set.seed(1)
+```
+
+
+# Data Prep and Cleaning
+The data was first loaded into R and partitioned into train and test datasets. 
+```{r, echo=TRUE, cache=TRUE}
+# Importing the training and testing datasets
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+# Creating a partition in the training dataset
+index <- createDataPartition(training$classe, p=.7, list=FALSE)
+trainset <- training[index,]
+testset <- training[-index,]
+
+str(trainset)
+```
+
+A quick scan of the dataset shows some variables have low variability (i.e., near zero variance) and other variables have many missing values. The data was therefore cleaned by removing these variables. The identification variables at the beginning of the dataset were removed as well.
+
+```{r, echo=TRUE, cache=TRUE}
+# Removing variables with near zero variance
+trainset <- trainset[, -nearZeroVar(trainset)]
+testset <- testset[, -nearZeroVar(testset)]
+
+# Removing variables will all missing dataset
+na_rm <- sapply(trainset, function(x) mean(is.na(x))) > .95
+trainset <- trainset[, na_rm==FALSE]
+testset <- testset[,na_rm==FALSE]
+
+# Removing ID variables
+trainset <- trainset[, -(1:6)]
+testset <- testset[, -(1:6)]
+```
+These procedures reduced the number of variables from `r length(names(training))` to `r length(names(trainset))`.
+
+# Correlations
+A correlation matrix was generated to see if many variables are correlated amongst themselves.
+```{r}
+corrplot(cor(trainset[, -53]), order="FPC", method="circle", type="lower", tl.cex=.6, tl.col=rgb(0,0,0))
+```
+
+
+# Prediction Models
+
+## Decision Tree Model
+```{r, echo=TRUE}
+# Creating the model
+fit_tree <- rpart(classe ~. ,data=trainset, method="class")
+fancyRpartPlot(fit_tree)
+
+# Testing the model on the test dataset
+predict_tree <- predict(fit_tree, newdata=testset, type="class")
+matrix_tree <- confusionMatrix(predict_tree, testset$classe)
+
+# Plotting the predictive accuracy of the Decision Tree Model
+plot(matrix_tree$table, col=matrix_tree$byClass,
+     main=paste("Decision Tree Model: Predictive Accuracy = ",round(matrix_tree$overall[1],4)))
+```
+
+The predictive accuracy of the Decision Tree Model is `r round(100*(matrix_tree$overall[1]),2)`%.
+
+## Generalized Boosted Model
+
+```{r echo=TRUE, message=TRUE, warning=FALSE, cache=TRUE}
+# Creating the model
+control <- trainControl(method="repeatedcv", number=5, repeats=2)
+fit_GBM <- train(classe ~., data=trainset, method="gbm",
+                 trControl=control, verbose=FALSE)
+fit_GBM$finalModel
+
+# Testing the model on the test dataset
+predict_GBM <- predict(fit_GBM, newdata=testset)
+matrix_GBM <- confusionMatrix(predict_GBM, testset$classe)
+
+# Plotting the predictive accuracy of the Decision Tree Model
+plot(matrix_GBM$table, col=matrix_GBM$byClass,
+     main=paste("Generalized Boosted Model: Predictive Accuracy = ",round(matrix_GBM$overall[1],4)))
+```
+
+The predictive accuracy of the Generalized Boosted Model is `r round(100*(matrix_GBM$overall[1]),2)`%, which is much higher than the Decision Tree Model.
+
+## Random Forest
+```{r echo=TRUE, message=TRUE, warning=FALSE, cache=TRUE}
+# Creating the model
+control_RF <- trainControl(method="repeatedcv", number=5, repeats=2)
+fit_RF <- train(classe ~., data=trainset, method="rf",
+                 trControl=control_RF, verbose=FALSE)
+fit_RF$finalModel
+
+# Testing the model on the test dataset
+predict_RF <- predict(fit_RF, newdata=testset)
+matrix_RF <- confusionMatrix(predict_RF, testset$classe)
+
+# Plotting the predictive accuracy of the Decision Tree Model
+plot(matrix_RF$table, col=matrix_RF$byClass,
+     main=paste("Random Forest Model: Predictive Accuracy = ",round(matrix_RF$overall[1],4)))
+```
+
+The predictive accuracy of the Random Forest Model is `r round(100*(matrix_RF$overall[1]),2)`%, which is the highest of the 3 models.
+
+# Final Test
+```{r, echo=FALSE}
+tree <- round(100*(matrix_tree$overall[1]),2)
+GBM <- round(100*(matrix_GBM$overall[1]),2)
+RF <- round(100*(matrix_RF$overall[1]),2)
+```
+The performance of the different models in terms of accuracy are as follows:
+
+1. Random Forest Model: **`r RF`%**
+2. Generalized Boosted Model: **`r GBM`%**
+3. Decision Tree Model: **`r tree`%**
+
+The Random Forest Model was used to predict the *classe* variable in the test dataset.
+
+```{r, echo=TRUE}
+predict_test <- predict(fit_RF, newdata=testing)
+predict_test
+```
+
